@@ -1,0 +1,180 @@
+<project name="DeployHub2Configuration" basedir="./">
+	
+	<!--
+		**This deployment script is for use outside of eclipse. To deploy
+		inside eclipse, use the build.xml script.
+	-->
+	
+	<!-- **Python script/properties used during local deployment -->
+	<property name="domain.import.script" value="${basedir}/scripts/import.py" />
+    <property name="domain.export.script" value="${basedir}/scripts/export.py" />
+    <property name="domain.datasource.script" value="${basedir}/scripts/createDataSource.py" />
+    <property name="domain.adapter.create.script" value="${basedir}/scripts/createAdapter.py" />
+    <property name="domain.adapter.redeploy.script" value="${basedir}/scripts/redeployAdapters.py" />
+    <property name="domain.adapter.load.script" value="${basedir}/scripts/loadAdapterPlans.py" />
+    <property name="domain.wtcModification.script" value="${basedir}/scripts/wtcModification.py" />    
+    <property name="domain.undeployProjects.script" value="${basedir}/scripts/undeployProjects.py" />
+
+    <condition property="destination" value="${user.name}">
+        <not>  
+            <isset property="destination"/>
+        </not>
+    </condition>	
+    <property file="${basedir}/properties/${destination}-weblogic.properties" />
+    <property name="middleware.home" value="${oracle.middleware.home4deploy}" />  
+     <property name="weblogic.home"      value="${middleware.home}/wlserver_10.3" />   
+    <property name="osb.home"           value="${middleware.home}/Oracle_OSB1" />
+    <property name="eclipse.home"       value ="${middleware.home}/${eclipseVersion}" />
+	
+    <!-- **The name of the customization template for the osb projects -->
+    <!--  -DcustomizationFile=cluster-customization.xml  for CMS-IOMS which need cluster configuration-->   
+    <condition property="customizationFile" value="None">
+        <not>  
+            <isset property="customizationFile"/>
+        </not>
+    </condition>	
+    
+    <condition property="loadCustomizationFile">
+        <not>
+            <equals arg1="${customizationFile}" arg2="None"/>
+        </not>
+    </condition>
+    
+    
+	<path id="wlst.class.path">
+
+
+
+
+        <fileset dir="${osb.home}/modules">
+         <include name="com.bea.common.configfwk_1.5.0.0.jar"/>
+         <include name="com.bea.core.xml.xmlbeans_2.1.0.0_2-5-1.jar"/>
+       </fileset>
+       <fileset dir="${weblogic.home}/server/lib">
+         <include name="weblogic.jar"/>
+         <include name="webserviceclient.jar" />
+       </fileset>
+       <fileset dir="${osb.home}/lib">
+       <include name="sb-kernel-api.jar" />
+         <include name="alsb.jar"/>
+       </fileset>
+	</path>
+  
+
+	<taskdef name="wlst" classname="weblogic.ant.taskdefs.management.WLSTTask"
+		classpathref="wlst.class.path" />
+	
+    
+     <target name="exportFromOSB" depends="configure">
+      
+        <mkdir dir="${basedir}/export" />
+        <wlst fileName="${domain.export.script}" debug="true" failOnError="true"  classpathref="wlst.class.path" 
+              arguments="${export.project} ${export.jar} ${export.customFile} ${destination}">
+          <script>  
+           project = sys.argv[1]
+           exportJar = sys.argv[2]
+           passphrase = "hub2osb"
+           customFile = sys.argv[3]
+           environment=sys.argv[4]
+          </script>
+        </wlst>
+   </target>
+    
+	<target name="deploy" depends="configure">
+       <!-- Because no if/else in ant, so we are using this way to run one of two targets. --> 
+		<antcall target="deployWithCustomizationFile"/> 
+        <antcall target="deployWithoutCustomizationFile"/>    
+    
+	</target>
+    
+    <target name="deployWithCustomizationFile" if="loadCustomizationFile"> 
+        <echo>loading CustomizationFile for deployment</echo> 
+        <copy file="${basedir}/osbconfig/${customizationFile}" tofile="${basedir}/${destination}_customization.xml" overwrite="true"/>
+			<replace replacefilterfile="${basedir}/osbconfig/${destination}.properties" 
+						file="${basedir}/${destination}_customization.xml"/>
+        
+           <deploymacro customization.path="${destination}_customization.xml" />
+    </target>
+    
+    
+    <target name="deployWithoutCustomizationFile" unless="loadCustomizationFile"> 
+         <echo>deployment without CustomizationFile</echo> 
+         <deploymacro customization.path="${customizationFile}" />
+    </target>
+    
+    
+    
+    <target name="configure">
+   
+        <!-- not using at the moment, but leave this target for further initial process-->    
+     
+	</target>
+    
+
+	<macrodef name="deploymacro">
+		<attribute name="customization.path"/>
+        <attribute name="environment" default="${destination}"/>
+		<sequential>
+			<wlst fileName="${domain.import.script}" debug="true" failOnError="true" classpathref="wlst.class.path"
+              arguments="${import.project} ${import.jar} @{customization.path} @{environment}">
+				<script>
+                    passphrase = "hub2osb"
+                    project=sys.argv[1]
+                    importJar=sys.argv[2]
+                    customFile=sys.argv[3]
+                    environment=sys.argv[4]
+                </script>
+			</wlst>
+		</sequential>
+	</macrodef>
+    
+    
+    <!-- target for delete/create datasource for JDBC or JMS   -->   
+    <target name="createDataSource" depends="configure">
+       
+		<wlst fileName="${domain.datasource.script}" debug="true" failOnError="true" classpathref="wlst.class.path"   arguments="${destination}"/>
+	</target>    
+    
+     <!-- target for delete/create data adapter for DBAdapter, AQAdapter ad JMSAdapter   -->   
+    <target name="createAdapter" depends="configure">
+      
+		<wlst fileName="${domain.adapter.create.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+			</wlst>
+     
+    </target>
+    
+    <target name="redeployAdapters" depends="configure">
+    
+            
+        <wlst fileName="${domain.adapter.redeploy.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+			</wlst>    
+	
+    </target>
+    
+    <target name="loadAdapterPlans" depends="configure">
+      
+		<wlst fileName="${domain.adapter.load.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+			</wlst>
+            
+          
+	
+    </target>
+    
+     <target name="undeployProjects" depends="configure">
+        
+		<wlst fileName="${domain.undeployProjects.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+			</wlst>
+	
+    </target>
+    
+    <target name="updateWTC" depends="configure" description="After imported target jar, There are some extra properties need to be modified in weblogic">
+       
+        <wlst fileName="${domain.wtcModification.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">       
+        </wlst> 
+    </target>
+    
+    
+    
+    
+
+</project>
