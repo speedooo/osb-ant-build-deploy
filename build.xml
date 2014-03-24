@@ -1,18 +1,21 @@
-<project name="HUBConfiguration" default="package" basedir="../">
+<project name="HUBConfiguration" default="help" basedir="../">
 
     <!-- **You will need to have a 'MW_HOME' environment variable set in order 
 		for this build script to work. To build Oracle service bus projects it is 
 		dependant on libraries inside the OSB/WL install. i.e. MW_HOME=C:\Oracle\Middleware\v11.1.1.5.0 -->
     
     
-    <property name="config.project" value="HUBConfiguration" />     
+    <property name="config.project" value="HUBConfiguration" />  
+     <taskdef resource="net/sf/antcontrib/antcontrib.properties"/> 
+     <taskdef resource="net/sf/antcontrib/antlib.xml" /> 
+     <var name="project.names" />  
 
-    <condition property="destination" value="${user.name}">
+    <condition property="environment" value="${user.name}">
         <not>  
-            <isset property="destination"/>
+            <isset property="environment"/>
         </not>
     </condition>
-    <property file="${basedir}/${config.project}/properties/${destination}-weblogic.properties" />
+    <property file="${basedir}/osbBuild/properties/${environment}-weblogic.properties" />
     
   
     <property name="middleware.home"    value="${oracle.middleware.home4build}" />  
@@ -40,18 +43,27 @@
          <include name="alsb.jar"/>
        </fileset>
     </path>
-
-   
-    <!-- **A listing of the osb projects to be included in the build. This list 
-		will need to be ammended each time a project is added. -->
-	<property name="project.names" value="ExternalResources,PoliceServices,eBenchServices,CommonResources,CMSServices,CollectServices,CommonServices" />
-
-	<!-- **Unfortunately no way to derive include patterns from the project 
-		names without including additonal ant libraries. This list will need to be 
-		ammended each time a project is added. -->
-	<property name="project.includes"
-		value="${config.project}/**,ExternalResources/**,PoliceServices/**,eBenchServices/**,CommonResources/**,CMSServices/**,CollectServices/**,CommonServices/**" />
-
+    
+    <target name="help">
+		<echo message="================================================================================"/>
+		<echo message="Usage : package"/>
+		<echo message="    ant package -Denvironment=environment.name"/>
+		<echo message="        environment.name - the properties file name of the build environment to build the osb jar file. if not set, will pick your windows LAN id like RENKEVI-weblogic.properties"/>
+		<echo message="    ant package -Denvironment=appbuild "/>
+		<echo message="        this is for Bamboo agent, configured in appbuild-weblogic.properties"/>
+		<echo message="Usage : releasePackage"/>
+		<echo message="    ant releasePackage "/>
+		<echo message="        will create the release zip file for release propose"/>
+		<echo message="Usage : package-deploy"/>
+		<echo message="    ant package-deploy "/>
+		<echo message="        make build osb jar and deploy to your dev osb server configured in your LANid-weblogic.properties"/>
+				
+		<echo message="================================================================================"/>
+		
+	</target>
+    
+    
+	
     <!-- **A temporary directory for staging the build -->
 	<property name="tmp.dir" value="${basedir}/.tmp" />     
         
@@ -60,17 +72,27 @@
     <target name="clean">
         <delete dir="${basedir}/target" />
         <delete dir="${tmp.dir}" />
+        <mkdir dir="${tmp.dir}" />
     </target>
-
-    <!--
-		 **This target builds a single jar file containing all hub projects. Additionally a
-		 a customization file is built for each environment.
-	-->
-	<target name="package" depends="clean">
-           
-		<stage />
+    
+    <target name="copyResources" depends="clean">
+    		
+		<copy todir="${tmp.dir}">
+            <fileset dir="${basedir}" 
+					excludes=".*/**, **/osbconfig/, **/scripts, osbBuild/, capabilities/" />
+        </copy>
+        
+        <copy todir="${tmp.dir}">
+            <fileset dir="${basedir}/capabilities" 
+					excludes=".*/**, **/osbconfig/, **/scripts, osbBuild/" />
+        </copy>
+      
+        <copy todir="${tmp.dir}">
+            <fileset dir="${basedir}/../mds-store/soa-infra/apps/justice.govt.nz/" />
+        </copy>
 				        
-		<copy file="${basedir}/${config.project}/deploy.xml" todir="${basedir}/target/" />
+				        
+		<copy file="osbBuild/deploy.xml" todir="${basedir}/target/" />
 		        
         <copy todir="${basedir}/target" >
         
@@ -81,36 +103,39 @@
                 <include name="properties/*weblogic.properties" />
             </fileset>
 		</copy>
-        <!-- real build process --> 
-		<export />
-        
+
+    
+    </target>
+
+    <!--
+		 **This target builds a single jar file containing all hub projects. Additionally a
+		 a customization file is built for each environment.
+	-->
+	<target name="package" depends="copyResources" >
+          		 
+   		 <!-- generate the project name list of subprojects -->
+		<for param="osb.application.path">
+            <path>
+                <dirset dir="${tmp.dir}" includes="*" excludes="${config.project},*/*/"/>
+            </path>
+            <sequential>
+             <var name="subProject" unset="true"/>
+                <basename file="@{osb.application.path}" property="subProject"/>
+                <var name="project.names" value="${project.names},${subProject}"/>
+            </sequential>
+        </for>		 
+		 
+		<exportFromWorkspace />       
        
         
 	</target>
 	
-     <!-- make zip for EST-->
-	<target name="releasePackage" depends="package">
-		<zip destfile="${basedir}/${project.name}.${release.number}.zip" basedir="${basedir}/target" />
-	</target>
-  
-
-    <!-- **This macro stages the projects in a temporary directory. A workaround to get
-		 the wlst export to work. -->
-    <macrodef name="stage">
-        <sequential>
-            <mkdir dir="${tmp.dir}" />
-            <copy todir="${tmp.dir}">
-                <fileset dir="${basedir}" includes="${project.includes}"
-					excludes="${tmp.dir},**/osbconfig/, **/scripts" />
-            </copy>
-        </sequential>
-    </macrodef>
-
 	<!--
 		 **This uses the export facility built into Oracle's Eclipse IDE to generate jar files that
 		 can be imported into the OSB
 	-->
-	<macrodef name="export">
+	<macrodef name="exportFromWorkspace">
+	
 		<attribute name="config" default="${config.project}" />
 		<attribute name="jar.name" default="${build.jar}" />
 		<attribute name="config.subproject" default="${project.names}" />
@@ -125,7 +150,7 @@
                 <arg line="-configProject ${config.project}" />
                 <arg line="-configJar ${basedir}/target/@{jar.name}" />
                 <arg line="-configSubProjects @{config.subproject}" />
-                <arg line="-includeDependencies ${config.includeDependencies}" />
+               <arg line="-includeDependencies ${config.includeDependencies}" />
                 <sysproperty key="osb.home" value="${wl.osb.home}" />
                 <sysproperty key="weblogic.home" value="${wl.home}" />
                 <sysproperty key="harvester.home" value="${wl.osb.home}/harvester" />
@@ -138,11 +163,19 @@
         </sequential>
     </macrodef>
 
+    <!-- this is for deploy the artefacts to developer's own server -->
     <target name="package-deploy" depends="package">
         <subant target="deploy">
             <fileset dir="${basedir}/target" includes="deploy.xml"/>
         </subant>
     
     </target>
+    
+    <!-- make zip for release team-->
+	<target name="releasePackage" depends="package">
+		<zip destfile="${basedir}/${project.name}.${release.number}.zip" basedir="${basedir}/target" />
+	</target>
+  
+  
 
 </project>

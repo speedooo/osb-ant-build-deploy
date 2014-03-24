@@ -1,4 +1,4 @@
-<project name="DeployHub2Configuration" basedir="./">
+<project name="DeployHub2Configuration" default="help" basedir="./">
 	
 	<!--
 		**This deployment script is for use outside of eclipse. To deploy
@@ -15,12 +15,13 @@
     <property name="domain.wtcModification.script" value="${basedir}/scripts/wtcModification.py" />    
     <property name="domain.undeployProjects.script" value="${basedir}/scripts/undeployProjects.py" />
 
-    <condition property="destination" value="${user.name}">
+    <taskdef resource="net/sf/antcontrib/antcontrib.properties"/> 
+    <condition property="environment" value="${user.name}">
         <not>  
-            <isset property="destination"/>
+            <isset property="environment"/>
         </not>
     </condition>	
-    <property file="${basedir}/properties/${destination}-weblogic.properties" />
+    <property file="${basedir}/properties/${environment}-weblogic.properties" />
     <property name="middleware.home" value="${oracle.middleware.home4deploy}" />  
      <property name="weblogic.home"      value="${middleware.home}/wlserver_10.3" />   
     <property name="osb.home"           value="${middleware.home}/Oracle_OSB1" />
@@ -42,10 +43,6 @@
     
     
 	<path id="wlst.class.path">
-
-
-
-
         <fileset dir="${osb.home}/modules">
          <include name="com.bea.common.configfwk_1.5.0.0.jar"/>
          <include name="com.bea.core.xml.xmlbeans_2.1.0.0_2-5-1.jar"/>
@@ -64,12 +61,42 @@
 	<taskdef name="wlst" classname="weblogic.ant.taskdefs.management.WLSTTask"
 		classpathref="wlst.class.path" />
 	
+	<target name="help">
+		<echo message="================================================================================"/>
+		<echo message="Usage : deploy"/>
+		<echo message="    ant -f deploy.xml -Denvironment=sbst -DcustomizationFile=customization.xml deploy "/>
+		<echo message="        this is for sbst environment with customization.xml template, configured in sbst-weblogic.properties"/>
+		<echo message="    ant -f deploy.xml -Denvironment=appbuild deploy "/>
+		<echo message="        this is for bamboo agent without customization.xml, configured in appbuild-weblogic.properties"/>
+		<echo message="Usage : exportFromOSB"/>
+		<echo message="    ant -f deploy.xml exportFromOSB "/>
+		<echo message="        export/backup all projects from your OSB server, if not set environment value"/>
+		<echo message="Usage : configure - create customization.xml for your deploy environmentserver "/>
+		<echo message="    ant -f deploy.xml configure -Denvironment=environment.name"/>
+		<echo message="        environment.name - the properties file name of the build environment to build the osb jar file. if not set, will pick your windows LAN id like RENKEVI-weblogic.properties"/>
+		
+		<echo message="Usage : createDataSource "/>
+		<echo message="    ant -f deploy.xml createDataSource "/>
+		<echo message="        create DatabaseSource , JMS in your XXXX-weblogic.properties"/>
+		
+		<echo message="Usage : createAdapter "/>
+		<echo message="    ant -f deploy.xml createAdapter "/>
+		<echo message="        create adpter like DB, JMS and AQ, configured in your  XXXX-weblogic.properties"/>
+		
+		<echo message="if you want configure your target environment server, package name..., you need modify properties/XXXX-weblogic.properties file "/>
+		<echo message="If you want to configure your third party service endpoint IP and Port number, your need modify osbconfig/XXXX.properties. This is used to create customization.xml "/>
+						
+		<echo message="================================================================================"/>
+		
+	</target>
+	
+	
     
      <target name="exportFromOSB" depends="configure">
       
         <mkdir dir="${basedir}/export" />
         <wlst fileName="${domain.export.script}" debug="true" failOnError="true"  classpathref="wlst.class.path" 
-              arguments="${export.project} ${export.jar} ${export.customFile} ${destination}">
+              arguments="${export.project} ${export.jar} ${export.customFile} ${environment}">
           <script>  
            project = sys.argv[1]
            exportJar = sys.argv[2]
@@ -81,24 +108,27 @@
    </target>
     
 	<target name="deploy" depends="configure">
-       <!-- Because no if/else in ant, so we are using this way to run one of two targets. --> 
-		<antcall target="deployWithCustomizationFile"/> 
-        <antcall target="deployWithoutCustomizationFile"/>    
-    
+      <if>
+        <equals arg1="${loadCustomizationFile}" arg2="true" />
+        <then>
+            <antcall target="deployWithCustomizationFile"/> 
+        </then>
+        <else>
+            <antcall target="deployWithoutCustomizationFile"/> 
+         </else>
+      </if>
+       
 	</target>
     
-    <target name="deployWithCustomizationFile" if="loadCustomizationFile"> 
+    <target name="deployWithCustomizationFile" > 
         <echo>loading CustomizationFile for deployment</echo> 
-        <copy file="${basedir}/osbconfig/${customizationFile}" tofile="${basedir}/${destination}_customization.xml" overwrite="true"/>
-			<replace replacefilterfile="${basedir}/osbconfig/${destination}.properties" 
-						file="${basedir}/${destination}_customization.xml"/>
-        
-           <deploymacro customization.path="${destination}_customization.xml" />
+            
+        <deploymacro customization.path="${environment}_customization.xml" />
     </target>
     
     
-    <target name="deployWithoutCustomizationFile" unless="loadCustomizationFile"> 
-         <echo>deployment without CustomizationFile</echo> 
+    <target name="deployWithoutCustomizationFile" > 
+         <echo>deployment without CustomizationFile for developer only</echo> 
          <deploymacro customization.path="${customizationFile}" />
     </target>
     
@@ -106,14 +136,16 @@
     
     <target name="configure">
    
-        <!-- not using at the moment, but leave this target for further initial process-->    
+        <copy file="${basedir}/osbconfig/${customizationFile}" tofile="${basedir}/${environment}_customization.xml" overwrite="true"/>
+			<replace replacefilterfile="${basedir}/osbconfig/${environment}.properties" 
+						file="${basedir}/${environment}_customization.xml"/>    
      
 	</target>
     
 
 	<macrodef name="deploymacro">
 		<attribute name="customization.path"/>
-        <attribute name="environment" default="${destination}"/>
+        <attribute name="environment" default="${environment}"/>
 		<sequential>
 			<wlst fileName="${domain.import.script}" debug="true" failOnError="true" classpathref="wlst.class.path"
               arguments="${import.project} ${import.jar} @{customization.path} @{environment}">
@@ -132,13 +164,13 @@
     <!-- target for delete/create datasource for JDBC or JMS   -->   
     <target name="createDataSource" depends="configure">
        
-		<wlst fileName="${domain.datasource.script}" debug="true" failOnError="true" classpathref="wlst.class.path"   arguments="${destination}"/>
+		<wlst fileName="${domain.datasource.script}" debug="true" failOnError="true" classpathref="wlst.class.path"   arguments="${environment}"/>
 	</target>    
     
      <!-- target for delete/create data adapter for DBAdapter, AQAdapter ad JMSAdapter   -->   
     <target name="createAdapter" depends="configure">
       
-		<wlst fileName="${domain.adapter.create.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+		<wlst fileName="${domain.adapter.create.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${environment}">
 			</wlst>
      
     </target>
@@ -146,14 +178,14 @@
     <target name="redeployAdapters" depends="configure">
     
             
-        <wlst fileName="${domain.adapter.redeploy.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+        <wlst fileName="${domain.adapter.redeploy.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${environment}">
 			</wlst>    
 	
     </target>
     
     <target name="loadAdapterPlans" depends="configure">
       
-		<wlst fileName="${domain.adapter.load.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+		<wlst fileName="${domain.adapter.load.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${environment}">
 			</wlst>
             
           
@@ -162,14 +194,14 @@
     
      <target name="undeployProjects" depends="configure">
         
-		<wlst fileName="${domain.undeployProjects.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">
+		<wlst fileName="${domain.undeployProjects.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${environment}">
 			</wlst>
 	
     </target>
     
     <target name="updateWTC" depends="configure" description="After imported target jar, There are some extra properties need to be modified in weblogic">
        
-        <wlst fileName="${domain.wtcModification.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${destination}">       
+        <wlst fileName="${domain.wtcModification.script}" debug="true" failOnError="true" classpathref="wlst.class.path" arguments="${environment}">       
         </wlst> 
     </target>
     
